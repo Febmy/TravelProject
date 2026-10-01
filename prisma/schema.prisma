@@ -1,0 +1,303 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  EXPIRED
+  FAILED
+}
+
+// 1. Data Pengguna & Admin
+model User {
+  id           String    @id @default(uuid())
+  name         String
+  email        String    @unique
+  passwordHash String
+  isVerified   Boolean   @default(false)
+  role         Role      @default(USER)
+  phoneNumber  String?
+  bookings     Booking[]
+  reviews      Review[]
+  wishlists    Wishlist[]
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+// 2. Data Destinasi Wisata
+model Destination {
+  id          String    @id @default(uuid())
+  name        String
+  slug        String    @unique
+  city        String
+  country     String
+  description String?
+  imageUrl    String?
+  packages    Package[]
+  createdAt   DateTime  @default(now())
+}
+
+// 3. Paket Wisata (Tour Package)
+model Package {
+  id                  String            @id @default(uuid())
+  destinationId       String?
+  title               String
+  slug                String            @unique
+  category            String?           @default("Umrah Reguler")
+  description         String
+  durationDays        Int
+  departureCity       String?
+  flightAirline       String?
+  flightSeatAllotment Int?
+  price               Decimal           @db.Decimal(12, 2)
+  itinerary           Json?             // Rencana perjalanan harian
+  hotels              Json?             // [{"city": "Makkah", "name": "...", "stars": 5, "nights": 5}]
+  includes            String[]
+  excludes            String[]
+  allowSharingRoom    Boolean           @default(true)
+  mealPlanBreakfast   Boolean           @default(true)
+  mealPlanAddonPrice  Decimal?          @db.Decimal(12, 2)
+  rating              Float             @default(5.0)
+  status              String            @default("published")
+  isActive            Boolean           @default(true)
+  destination         Destination?      @relation(fields: [destinationId], references: [id])
+  images              PackageImage[]
+  schedules           PackageSchedule[]
+  rooms               PackageRoom[]
+  reviews             Review[]
+  wishlistedBy        Wishlist[]
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+}
+
+// 3.5. Alokasi Kamar Paket Wisata
+model PackageRoom {
+  id                 String   @id @default(uuid())
+  packageId          String
+  roomType           String
+  capacityPerRoom    Int
+  roomCount          Int
+  priceRoomOnly      Decimal  @db.Decimal(12, 2)
+  priceWithBreakfast Decimal  @db.Decimal(12, 2)
+  totalPaxCapacity   Int
+  package            Package  @relation(fields: [packageId], references: [id], onDelete: Cascade)
+}
+
+// 4. Galeri Foto Paket Wisata
+model PackageImage {
+  id        String   @id @default(uuid())
+  packageId String
+  imageUrl  String
+  isPrimary Boolean  @default(false)
+  package   Package  @relation(fields: [packageId], references: [id], onDelete: Cascade)
+}
+
+// 5. Jadwal & Kuota Keberangkatan
+model PackageSchedule {
+  id          String    @id @default(uuid())
+  packageId   String
+  startDate   DateTime
+  endDate     DateTime
+  quota       Int       // Kapasitas kursi tersedia
+  bookedCount Int       @default(0)
+  package     Package   @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  bookings    Booking[]
+}
+
+// 6. Data Transaksi Pemesanan (Booking)
+model Booking {
+  id              String           @id @default(uuid())
+  bookingCode     String           @unique // Contoh: TRV-2026-001 atau SFR-2026-XXXX
+  userId          String?
+  itemType        String           @default("TOUR") // "TOUR" | "HOTEL"
+  title           String?          // Judul paket / nama hotel
+  scheduleId      String?
+  hotelId         String?
+  hotelRoomId     String?
+  guestName       String?
+  guestEmail      String?
+  guestPhone      String?
+  specialRequest  String?
+  checkInDate     DateTime?
+  checkOutDate    DateTime?
+  
+  // Supplier / Manual Fulfillment Data
+  supplierBookingCode String?  // e.g. "Agoda-12345" or "H-8812"
+  supplierVoucherUrl  String?  // PDF or Image link of official hotel voucher
+
+  numParticipants Int              @default(1)
+  totalPrice      Decimal          @db.Decimal(12, 2)
+  status          BookingStatus    @default(PENDING)
+  user            User?            @relation(fields: [userId], references: [id])
+  schedule        PackageSchedule? @relation(fields: [scheduleId], references: [id])
+  hotel           Hotel?           @relation(fields: [hotelId], references: [id])
+  hotelRoom       HotelRoom?       @relation(fields: [hotelRoomId], references: [id])
+  payment         Payment?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+}
+
+// 7. Data Pembayaran
+model Payment {
+  id            String        @id @default(uuid())
+  bookingId     String        @unique
+  paymentMethod String?
+  amount        Decimal       @db.Decimal(12, 2)
+  status        PaymentStatus @default(PENDING)
+  transactionId String?       // ID referensi dari Payment Gateway / Bank
+  proofUrl      String?       // Bukti transfer bank (URL gambar / data URI)
+  senderBank    String?       // Nama bank pengirim
+  senderName    String?       // Nama pemilik rekening pengirim
+  paidAt        DateTime?
+  booking       Booking       @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  createdAt     DateTime      @default(now())
+}
+
+// 8. Data Hotel (Stays)
+model Hotel {
+  id          String       @id @default(uuid())
+  name        String
+  slug        String       @unique
+  location    String
+  description String
+  rating      Float        @default(0.0)
+  price       Decimal      @db.Decimal(12, 2) // Harga mulai dari
+  tag         String?      // Contoh: "Luxury", "Boutique"
+  amenities   String[]
+  status      String       @default("published")
+  images      HotelImage[]
+  rooms       HotelRoom[]
+  bookings    Booking[]
+  reviews     Review[]
+  wishlistedBy Wishlist[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+model HotelImage {
+  id        String  @id @default(uuid())
+  hotelId   String
+  imageUrl  String
+  isPrimary Boolean @default(false)
+  hotel     Hotel   @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+}
+
+model HotelRoom {
+  id            String   @id @default(uuid())
+  hotelId       String
+  name          String
+  capacity      Int
+  totalRooms    Int      @default(1)
+  pricePerNight Decimal  @db.Decimal(12, 2)
+  hotel         Hotel    @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  bookings      Booking[]
+}
+
+// 9. Data Ulasan (Reviews)
+model Review {
+  id        String   @id @default(uuid())
+  userId    String
+  packageId String?
+  hotelId   String?
+  rating    Int      // 1 to 5
+  comment   String?
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  package   Package? @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  hotel     Hotel?   @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+}
+
+// 10. Data Wishlist / Favorit
+model Wishlist {
+  id        String   @id @default(uuid())
+  userId    String
+  packageId String?
+  hotelId   String?
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  package   Package? @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  hotel     Hotel?   @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+}
+
+// 11. Token Verifikasi Email
+model VerificationToken {
+  id        String   @id @default(uuid())
+  email     String
+  token     String   @unique
+  expires   DateTime
+  createdAt DateTime @default(now())
+
+  @@unique([email, token])
+}
+
+// 12. Promo / Voucher
+model Promo {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  campaign    String
+  type        String   @default("PERCENTAGE") // "PERCENTAGE" | "FIXED"
+  amount      Decimal  @db.Decimal(12, 2)     // 10 for 10%, or 1500000 for Fixed
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// 13. Audit Log (Log Aktivitas Sistem)
+model AuditLog {
+  id          String   @id @default(uuid())
+  userId      String?  // ID User yang melakukan aksi (opsional jika sistem)
+  userName    String?  // Nama user / admin saat itu
+  action      String   // CREATE, UPDATE, DELETE, VERIFY, dsb.
+  entityType  String   // BOOKING, PROMO, USER, PACKAGE, HOTEL
+  entityId    String   // ID dari entitas yang diubah
+  details     String?  // Deskripsi ringkas aksi
+  createdAt   DateTime @default(now())
+}
+
+// 14. Pengaturan Sistem
+model SystemSetting {
+  id                   String   @id @default("safara-settings")
+  paymentGatewayActive Boolean  @default(false)
+  waNotificationActive Boolean  @default(true)
+  supplierApiActive    Boolean  @default(false)
+  useSafaraCodeOnly    Boolean  @default(false)
+  adminWhatsApp        String   @default("6281234567890")
+  customerCareWhatsApp String   @default("6281234567891")
+  updatedAt            DateTime @updatedAt
+}
+
+// 15. Rekening Bank Travel (Manual Transfer)
+model BankAccount {
+  id            String   @id @default(uuid())
+  bankName      String
+  accountNumber String
+  accountName   String
+  code          String?  // e.g. "014" for BCA
+  logoText      String?  // e.g. "BCA"
+  logoUrl       String?  // base64 image or actual URL
+  badge         String?  // e.g. "Paling Direkomendasikan"
+  color         String?  // e.g. "#005E6A"
+  lightBg       String?  // e.g. "#F0F9FF"
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
