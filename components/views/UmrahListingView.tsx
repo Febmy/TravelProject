@@ -1,9 +1,25 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
-import { Plane, Calendar, ShieldCheck, Star, Users, ArrowRight, Building, CheckCircle2, RotateCcw } from 'lucide-react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import {
+  Plane,
+  Calendar,
+  ShieldCheck,
+  Star,
+  Users,
+  ArrowRight,
+  Building,
+  CheckCircle2,
+  RotateCcw,
+  Search,
+  X,
+  SlidersHorizontal,
+  ChevronDown,
+  Sparkles,
+  Clock,
+  Banknote,
+} from 'lucide-react';
 import { figmaUmrahPackages, UmrahPackage, figmaAssets } from '@/lib/figma-data';
-
 import { useRouter } from 'next/navigation';
 
 interface UmrahListingViewProps {
@@ -12,96 +28,169 @@ interface UmrahListingViewProps {
 
 export function UmrahListingView({ initialPackages = [] }: UmrahListingViewProps) {
   const router = useRouter();
+  const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedDuration, setSelectedDuration] = useState<string>('all');
   const [selectedAirline, setSelectedAirline] = useState<string>('all');
-  const [maxBudget, setMaxBudget] = useState<number>(60000000);
+  const [selectedMonth, setSelectedMonth] = useState<string>('all');
+  const [maxBudget, setMaxBudget] = useState<number>(65000000);
+
+  const durationOptions = [
+    { id: 'all', label: 'Semua Durasi' },
+    { id: '9', label: '9 Hari' },
+    { id: '12', label: '12 Hari' },
+    { id: '14', label: '14+ Hari' },
+  ];
+
+  const airlineOptions = [
+    { id: 'all', label: 'Semua Maskapai' },
+    { id: 'garuda', label: 'Garuda Indonesia' },
+    { id: 'saudi', label: 'Saudia Airlines' },
+    { id: 'turkish', label: 'Turkish Airlines' },
+  ];
+
+  const monthOptions = [
+    { id: 'all', label: 'Semua Bulan' },
+    { id: '03', label: 'Maret 2026' },
+    { id: '04', label: 'April 2026 (Ramadhan)' },
+    { id: '05', label: 'Mei 2026 (Syawal)' },
+    { id: '12', label: 'Desember 2026 (Liburan)' },
+  ];
 
   const filteredPackages = useMemo(() => {
     return initialPackages.filter((pkg) => {
+      // 1. Text Search Match
+      const matchesSearch =
+        !searchQuery ||
+        pkg.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        pkg.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (pkg.includes &&
+          pkg.includes.some((inc: string) => inc.toLowerCase().includes(searchQuery.toLowerCase())));
+
+      // 2. Duration Match
       const durationStr = pkg.durationDays ? pkg.durationDays.toString() : '';
       const matchDuration =
         selectedDuration === 'all' ||
         (selectedDuration === '9' && durationStr === '9') ||
-        (selectedDuration === '12' && durationStr === '12');
+        (selectedDuration === '12' && durationStr === '12') ||
+        (selectedDuration === '14' && Number(pkg.durationDays) >= 14);
 
+      // 3. Airline Match
       const matchAirline =
         selectedAirline === 'all' ||
-        (pkg.includes && pkg.includes.some((inc: string) => inc.toLowerCase().includes(selectedAirline.toLowerCase())));
+        (pkg.includes &&
+          pkg.includes.some((inc: string) => inc.toLowerCase().includes(selectedAirline.toLowerCase())));
 
+      // 4. Price Match
       const matchPrice = Number(pkg.price) <= maxBudget;
 
-      return matchDuration && matchAirline && matchPrice;
+      return matchesSearch && matchDuration && matchAirline && matchPrice;
     });
-  }, [selectedDuration, selectedAirline, maxBudget, initialPackages]);
+  }, [searchQuery, selectedDuration, selectedAirline, maxBudget, initialPackages]);
+
+  const isFiltered =
+    searchQuery !== '' ||
+    selectedDuration !== 'all' ||
+    selectedAirline !== 'all' ||
+    selectedMonth !== 'all' ||
+    maxBudget !== 65000000;
 
   const handleReset = () => {
+    setSearchQuery('');
     setSelectedDuration('all');
     setSelectedAirline('all');
-    setMaxBudget(60000000);
+    setSelectedMonth('all');
+    setMaxBudget(65000000);
   };
 
   return (
     <div className="min-h-screen bg-[#FAF9F6] pb-24">
-      {/* 1. FILTER STRIPE (Figma filter-stripe) */}
-      <section className="border-b border-[#EAE6E1] bg-white py-4 shadow-sm">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
-          <div className="flex flex-wrap items-center gap-3 text-xs">
-            {/* Filter Durasi */}
-            <div className="flex items-center gap-2 rounded-xl border border-[#EAE6E1] bg-[#FAF9F6] px-3 py-2">
-              <Calendar className="h-4 w-4 text-[#0F766E]" />
-              <div>
-                <span className="block text-[10px] text-[#968A80]">Durasi Hari:</span>
-                <select
-                  value={selectedDuration}
-                  onChange={(e) => setSelectedDuration(e.target.value)}
-                  className="bg-transparent font-bold text-[#1C1A16] outline-none cursor-pointer"
+      {/* 1. MODERN TRAVEL FILTER STRIPE */}
+      <section className="sticky top-0 z-40 border-b border-[#EAE6E1] bg-white/95 backdrop-blur-md py-3.5 shadow-xs">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
+          <div className="flex flex-wrap items-center gap-2.5 text-xs">
+            {/* Search Input */}
+            <div className="flex items-center gap-2 rounded-2xl bg-[#FAF9F6] px-3.5 py-2 font-medium text-[#1C1A16] border border-[#EAE6E1] focus-within:border-[#0F766E] focus-within:bg-white focus-within:ring-2 focus-within:ring-[#0F766E]/15 transition shadow-2xs">
+              <Search className="h-4 w-4 text-[#0F766E] shrink-0" />
+              <input
+                type="text"
+                placeholder="Cari nama paket, program..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="bg-transparent text-xs font-semibold outline-none w-36 sm:w-48 text-[#1C1A16] placeholder:text-[#968A80]"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="rounded-full p-0.5 text-[#968A80] hover:bg-[#EAE6E1] hover:text-[#1C1A16] transition"
                 >
-                  <option value="all">Semua Durasi</option>
-                  <option value="9">9 Hari 8 Malam</option>
-                  <option value="12">12 Hari 11 Malam</option>
-                </select>
-              </div>
+                  <X className="h-3 w-3" />
+                </button>
+              )}
             </div>
 
-            {/* Filter Maskapai */}
-            <div className="flex items-center gap-2 rounded-xl border border-[#EAE6E1] bg-[#FAF9F6] px-3 py-2">
-              <Plane className="h-4 w-4 text-[#0F766E]" />
-              <div>
-                <span className="block text-[10px] text-[#968A80]">Maskapai:</span>
-                <select
-                  value={selectedAirline}
-                  onChange={(e) => setSelectedAirline(e.target.value)}
-                  className="bg-transparent font-bold text-[#1C1A16] outline-none cursor-pointer"
-                >
-                  <option value="all">Semua Maskapai</option>
-                  <option value="garuda">Garuda Indonesia</option>
-                  <option value="saudi">Saudi Airlines</option>
-                  <option value="turkish">Turkish Airlines</option>
-                </select>
+            {/* Durasi Filter Pills */}
+            <div className="flex items-center gap-1 rounded-2xl border border-[#EAE6E1] bg-[#FAF9F6] p-1 text-xs">
+              <div className="flex items-center gap-1 px-2 text-[#968A80] font-semibold hidden md:flex">
+                <Clock className="h-3.5 w-3.5 text-[#0F766E]" />
+                <span className="text-[10px]">Durasi:</span>
               </div>
+              {durationOptions.map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => setSelectedDuration(opt.id)}
+                  className={`rounded-xl px-2.5 py-1 text-xs font-bold transition ${
+                    selectedDuration === opt.id
+                      ? 'bg-[#0F766E] text-white shadow-xs'
+                      : 'text-[#6B6E6E] hover:text-[#1C1A16] hover:bg-white'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
             </div>
 
-            {/* Budget filter */}
-            <div className="flex items-center gap-2 rounded-xl border border-[#EAE6E1] bg-[#FAF9F6] px-3 py-2">
-              <span className="font-bold text-[#0F766E]">Rp</span>
-              <div>
-                <span className="block text-[10px] text-[#968A80]">Batas Budget:</span>
-                <select
-                  value={maxBudget}
-                  onChange={(e) => setMaxBudget(Number(e.target.value))}
-                  className="bg-transparent font-bold text-[#1C1A16] outline-none cursor-pointer"
-                >
-                  <option value={60000000}>Hingga Rp 60 Juta</option>
-                  <option value={45000000}>Hingga Rp 45 Juta</option>
-                  <option value={40000000}>Hingga Rp 40 Juta</option>
-                </select>
-              </div>
+            {/* Maskapai Selector */}
+            <div className="flex items-center gap-1.5 rounded-2xl border border-[#EAE6E1] bg-white px-3 py-1.5 shadow-2xs hover:border-[#0F766E]/50 transition">
+              <Plane className="h-3.5 w-3.5 text-[#0F766E]" />
+              <span className="text-[10px] text-[#968A80] font-bold uppercase hidden lg:inline">Maskapai:</span>
+              <select
+                value={selectedAirline}
+                onChange={(e) => setSelectedAirline(e.target.value)}
+                className="bg-transparent font-bold text-xs text-[#1C1A16] outline-none cursor-pointer"
+              >
+                {airlineOptions.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.label}
+                  </option>
+                ))}
+              </select>
             </div>
 
-            {(selectedDuration !== 'all' || selectedAirline !== 'all' || maxBudget !== 60000000) && (
+            {/* Budget Selector */}
+            <div className="flex items-center gap-1.5 rounded-2xl border border-[#EAE6E1] bg-white px-3 py-1.5 shadow-2xs hover:border-[#0F766E]/50 transition">
+              <Banknote className="h-3.5 w-3.5 text-[#0F766E]" />
+              <span className="text-[10px] text-[#968A80] font-bold uppercase hidden lg:inline">Budget:</span>
+              <select
+                value={maxBudget}
+                onChange={(e) => setMaxBudget(Number(e.target.value))}
+                className="bg-transparent font-bold text-xs text-[#1C1A16] outline-none cursor-pointer"
+              >
+                <option value={65000000}>Semua Budget (s/d 65 Juta)</option>
+                <option value={50000000}>Hingga Rp 50 Juta</option>
+                <option value={45000000}>Hingga Rp 45 Juta</option>
+                <option value={40000000}>Hingga Rp 40 Juta</option>
+                <option value={35000000}>Hingga Rp 35 Juta (Hemat)</option>
+              </select>
+            </div>
+
+            {/* Reset Button */}
+            {isFiltered && (
               <button
+                type="button"
                 onClick={handleReset}
-                className="flex items-center gap-1 text-xs font-semibold text-[#0F766E] hover:underline px-2"
+                className="flex items-center gap-1 rounded-xl bg-[#F0FDFA] border border-[#CCFBF1] px-2.5 py-1.5 text-xs font-bold text-[#0F766E] hover:bg-[#CCFBF1] transition shadow-2xs"
               >
                 <RotateCcw className="h-3 w-3" />
                 <span>Reset</span>
@@ -109,9 +198,11 @@ export function UmrahListingView({ initialPackages = [] }: UmrahListingViewProps
             )}
           </div>
 
-          <div className="flex items-center gap-2">
-            <span className="rounded-full bg-[#DCFCE7] px-3 py-1 text-xs font-bold text-[#15803D]">
-              ✓ PPIU Resmi Kemenag No. 912/2021
+          {/* Right Trust Badge */}
+          <div className="hidden sm:flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-[#DCFCE7] border border-[#BBF7D0] px-3 py-1 text-xs font-bold text-[#15803D] shadow-2xs">
+              <ShieldCheck className="h-3.5 w-3.5 text-[#16A34A]" />
+              PPIU Resmi Kemenag No. 912/2021
             </span>
           </div>
         </div>

@@ -1,6 +1,7 @@
 'use server';
 
 import prisma from '@/lib/prisma';
+import { serializeToPlain } from '@/lib/serialize';
 
 export async function getHotelsAction(filters?: { location?: string, minPrice?: number, maxPrice?: number }) {
   try {
@@ -27,7 +28,7 @@ export async function getHotelsAction(filters?: { location?: string, minPrice?: 
       price: h.price ? Number(h.price.toString()) : 0,
     }));
 
-    return { success: true, data: safeHotels };
+    return { success: true, data: serializeToPlain(safeHotels) };
   } catch (error: any) {
     console.error('getHotelsAction error:', error);
     return { success: false, error: error.message };
@@ -55,7 +56,7 @@ export async function getHotelBySlugAction(slug: string) {
       }))
     };
 
-    return { success: true, data: safeHotel };
+    return { success: true, data: serializeToPlain(safeHotel) };
   } catch (error: any) {
     console.error('getHotelBySlugAction error:', error);
     return { success: false, error: error.message };

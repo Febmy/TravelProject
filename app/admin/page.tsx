@@ -2,6 +2,7 @@ import React from 'react';
 import { redirect } from 'next/navigation';
 import { AdminOverviewView } from '@/components/views/AdminOverviewView';
 import { getAdminDashboardData } from '@/actions/admin';
+import { serializeToPlain } from '@/lib/serialize';
 
 // Force dynamic execution on each request
 export const dynamic = 'force-dynamic';
@@ -32,7 +33,7 @@ export default async function AdminPage() {
 
   return (
     <div className="min-h-screen bg-[#FAF9F5]">
-      <AdminOverviewView initialData={result.data} />
+      <AdminOverviewView initialData={serializeToPlain(result.data)} />
     </div>
   );
 }

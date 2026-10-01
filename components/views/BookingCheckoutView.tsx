@@ -18,6 +18,7 @@ import {
   X,
   FileText,
 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { createBookingAction, getPublicBankAccountsAction } from '@/actions/booking';
 import { useSession } from 'next-auth/react';
 import { useCartStore } from '@/store/cartStore';
@@ -81,15 +82,16 @@ export function BookingCheckoutView({
   setScreen,
   onPaymentSuccess,
 }: BookingCheckoutViewProps) {
+  const router = useRouter();
   const { data: session } = useSession();
 
   // Wizard Steps: 1 = Data Tamu, 2 = Pembayaran Rekening & Bukti Transfer
   const [step, setStep] = useState<1 | 2>(1);
 
-  // Form State: Data Tamu
-  const [fullName, setFullName] = useState('H. Ahmad Fauzi');
-  const [email, setEmail] = useState('ahmad.fauzi@gmail.com');
-  const [phone, setPhone] = useState('081234567890');
+  // Form State: Data Tamu (Diambil dari akun yang sedang login)
+  const [fullName, setFullName] = useState(session?.user?.name || '');
+  const [email, setEmail] = useState(session?.user?.email || '');
+  const [phone, setPhone] = useState('');
   const [specialRequest, setSpecialRequest] = useState('');
 
   // Selected Travel Bank
@@ -129,11 +131,13 @@ export function BookingCheckoutView({
 
   useEffect(() => {
     if (session?.user) {
-      if (session.user.name) {
+      if (session.user.name && !fullName) {
         setFullName(session.user.name);
         setSenderName(session.user.name);
       }
-      if (session.user.email) setEmail(session.user.email);
+      if (session.user.email && !email) {
+        setEmail(session.user.email);
+      }
     }
   }, [session]);
 
@@ -270,6 +274,13 @@ async function compressDataUrl(dataUrl: string, maxDim = 1000, quality = 0.75): 
     if (!fullName || !email || !phone) {
       alert('Mohon lengkapi data pemesan (Nama, Email, dan No. Telepon).');
       setStep(1);
+      return;
+    }
+
+    if (!session?.user) {
+      setSubmitError('Anda harus masuk (login) atau mendaftar akun terlebih dahulu untuk memesan.');
+      alert('Silakan login terlebih dahulu untuk melanjutkan pemesanan.');
+      router.push('/login?callbackUrl=/checkout');
       return;
     }
 
@@ -443,6 +454,28 @@ async function compressDataUrl(dataUrl: string, maxDim = 1000, quality = 0.75): 
                     E-tiket, bukti reservasi, dan jadwal akan dikirimkan ke kontak ini.
                   </p>
                 </div>
+
+                {session?.user && (
+                  <div className="mb-6 rounded-2xl bg-teal-50/80 border border-teal-200/80 p-4 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#0F766E] text-white font-bold text-sm shadow-sm">
+                        {session.user.name?.[0]?.toUpperCase() || 'U'}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-xs text-[#1C1A16]">{session.user.name}</span>
+                          <span className="rounded-full bg-teal-100 text-teal-800 text-[10px] font-bold px-2 py-0.5">
+                            Akun Terverifikasi
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-[#6B6E6E]">{session.user.email}</span>
+                      </div>
+                    </div>
+                    <span className="text-[11px] text-[#0F766E] font-medium hidden sm:inline">
+                      Data otomatis terisi
+                    </span>
+                  </div>
+                )}
 
                 <div className="space-y-4 text-xs">
                   <div>

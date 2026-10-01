@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
+import { useSession } from 'next-auth/react';
 import {
   Compass,
   LayoutDashboard,
@@ -30,6 +31,10 @@ import {
   Mail,
   Menu,
   ShieldCheck,
+  ShieldAlert,
+  Shield,
+  UserPlus,
+  EyeOff,
   Tag,
   AlertTriangle,
   UploadCloud,
@@ -48,6 +53,7 @@ import {
   togglePromoAction,
   updateUserRoleAction,
   deleteUserAction,
+  createUserBySuperAdminAction,
   updateSystemSettingAction,
   saveBankAccountsAction
 } from '@/actions/admin';
@@ -82,6 +88,46 @@ export function AdminOverviewView({ initialData }: AdminOverviewViewProps) {
   const [bankAccounts, setBankAccounts] = useState<any[]>(initialData?.bankAccounts || []);
   const [stats, setStats] = useState<any>(initialData?.stats || {});
   const [isSavingSettings, setIsSavingSettings] = useState(false);
+
+  // Current User & Super Admin Authorization Check
+  const { data: clientSession } = useSession();
+  const currentUser = initialData?.currentUser || null;
+
+  // Cek apakah akun aktif berstatus Super Admin dari server data, database user list, atau client session
+  const activeEmail = currentUser?.email || clientSession?.user?.email;
+  const userRecordInList = users.find((u) => u.email === activeEmail);
+  const isSuperAdmin =
+    currentUser?.role === 'SUPER_ADMIN' ||
+    userRecordInList?.role === 'SUPER_ADMIN' ||
+    clientSession?.user?.role === 'SUPER_ADMIN';
+
+  // Modal Ubah Peran (Khusus Super Admin)
+  const [selectedUserForRole, setSelectedUserForRole] = useState<{
+    id: string;
+    name: string;
+    email: string;
+    currentRole: 'USER' | 'ADMIN' | 'SUPER_ADMIN';
+    newRole: 'USER' | 'ADMIN' | 'SUPER_ADMIN';
+  } | null>(null);
+  const [isUpdatingRole, setIsUpdatingRole] = useState(false);
+
+  // Create User Modal (Super Admin only)
+  const [isCreateUserModalOpen, setIsCreateUserModalOpen] = useState(false);
+  const [isCreatingUser, setIsCreatingUser] = useState(false);
+  const [showNewUserPassword, setShowNewUserPassword] = useState(false);
+  const [newUserForm, setNewUserForm] = useState<{
+    name: string;
+    email: string;
+    password: string;
+    role: 'USER' | 'ADMIN' | 'SUPER_ADMIN';
+    phoneNumber: string;
+  }>({
+    name: '',
+    email: '',
+    password: '',
+    role: 'USER',
+    phoneNumber: '',
+  });
 
   // Promo State
   const [isCreatePromoOpen, setIsCreatePromoOpen] = useState(false);
@@ -404,28 +450,126 @@ export function AdminOverviewView({ initialData }: AdminOverviewViewProps) {
     }
   };
 
-  const handleToggleUserRole = async (id: string, currentRole: string) => {
-    const newRole = currentRole === 'ADMIN' ? 'USER' : 'ADMIN';
-    if (confirm(`Yakin ingin mengubah peran user ini menjadi ${newRole}?`)) {
-      const res = await updateUserRoleAction(id, newRole);
+  const handleOpenChangeRoleModal = (u: any) => {
+    if (!isSuperAdmin) {
+      showNotification('error', 'Akses ditolak: Hanya Super Admin yang berhak mengubah peran akun pengguna.');
+      return;
+    }
+    setSelectedUserForRole({
+      id: u.id,
+      name: u.name,
+      email: u.email,
+      currentRole: u.role,
+      newRole: u.role,
+    });
+  };
+
+  const handleSaveUserRole = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedUserForRole) return;
+    if (!isSuperAdmin) {
+      showNotification('error', 'Akses ditolak: Hanya Super Admin yang berhak mengubah peran akun pengguna.');
+      return;
+    }
+
+    if (selectedUserForRole.currentRole === selectedUserForRole.newRole) {
+      setSelectedUserForRole(null);
+      return;
+    }
+
+    setIsUpdatingRole(true);
+    try {
+      const res = await updateUserRoleAction(selectedUserForRole.id, selectedUserForRole.newRole);
       if (res.success && res.data) {
-        setUsers((prev) => prev.map(u => u.id === id ? { ...u, role: newRole } : u));
-        showNotification('success', `Peran berhasil diubah menjadi ${newRole}`);
+        setUsers((prev) =>
+          prev.map((u) =>
+            u.id === selectedUserForRole.id ? { ...u, role: selectedUserForRole.newRole } : u
+          )
+        );
+        showNotification(
+          'success',
+          `Peran ${selectedUserForRole.name} berhasil diubah menjadi ${selectedUserForRole.newRole}!`
+        );
+        setSelectedUserForRole(null);
       } else {
-        showNotification('error', 'Gagal mengubah peran user');
+        showNotification('error', res.error || 'Gagal mengubah peran pengguna');
       }
+    } catch (err: any) {
+      showNotification('error', err.message || 'Terjadi kesalahan sistem');
+    } finally {
+      setIsUpdatingRole(false);
     }
   };
 
-  const handleDeleteUser = async (id: string) => {
+  const handleDeleteUser = async (id: string, targetRole?: string) => {
+    if (targetRole === 'SUPER_ADMIN' && !isSuperAdmin) {
+      showNotification('error', 'Hanya Super Admin yang berhak menghapus akun Super Admin.');
+      return;
+    }
     if (confirm('PERINGATAN: Menghapus user akan menghapus semua data booking, review, dan wishlist mereka! Yakin ingin melanjutkan?')) {
       const res = await deleteUserAction(id);
       if (res.success) {
         setUsers((prev) => prev.filter(u => u.id !== id));
         showNotification('success', 'User berhasil dihapus beserta semua datanya');
       } else {
-        showNotification('error', 'Gagal menghapus user');
+        showNotification('error', res.error || 'Gagal menghapus user');
       }
+    }
+  };
+
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isSuperAdmin) {
+      showNotification('error', 'Akses ditolak: Hanya Super Admin yang berhak mendaftarkan pengguna baru.');
+      return;
+    }
+    if (!newUserForm.name.trim() || !newUserForm.email.trim() || !newUserForm.password) {
+      showNotification('error', 'Nama lengkap, email, dan kata sandi wajib diisi.');
+      return;
+    }
+    if (newUserForm.password.length < 6) {
+      showNotification('error', 'Kata sandi minimal harus 6 karakter.');
+      return;
+    }
+
+    setIsCreatingUser(true);
+    try {
+      const res = await createUserBySuperAdminAction(newUserForm);
+      if (res.success && res.data) {
+        const addedUser = res.data;
+        setUsers((prev) => [
+          {
+            id: addedUser.id,
+            name: addedUser.name,
+            email: addedUser.email,
+            role: addedUser.role,
+            phoneNumber: addedUser.phoneNumber || '-',
+            createdAt: addedUser.createdAt ? new Date(addedUser.createdAt).toISOString() : new Date().toISOString(),
+            tripsCount: 0,
+            totalSpend: 0,
+          },
+          ...prev,
+        ]);
+        setStats((prev: any) => ({
+          ...prev,
+          totalUsers: (prev?.totalUsers || 0) + 1,
+        }));
+        showNotification('success', `Pengguna ${addedUser.name} berhasil didaftarkan sebagai ${addedUser.role}!`);
+        setIsCreateUserModalOpen(false);
+        setNewUserForm({
+          name: '',
+          email: '',
+          password: '',
+          role: 'USER',
+          phoneNumber: '',
+        });
+      } else {
+        showNotification('error', res.error || 'Gagal mendaftarkan pengguna');
+      }
+    } catch (err: any) {
+      showNotification('error', err.message || 'Terjadi kesalahan sistem');
+    } finally {
+      setIsCreatingUser(false);
     }
   };
 
@@ -1863,14 +2007,43 @@ export function AdminOverviewView({ initialData }: AdminOverviewViewProps) {
           {activeMenu === 'Manajemen Pelanggan' && (
             <div className="space-y-6 animate-in fade-in duration-200">
               <div className="rounded-3xl border border-neutral-200 bg-white p-7 shadow-sm">
-                <div className="flex items-center justify-between border-b border-neutral-100 pb-5 mb-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-neutral-100 pb-5 mb-6">
                   <div>
-                    <h3 className="font-['Figtree'] text-lg font-bold text-neutral-900">
-                      Basis Data Pelanggan & Jemaah Terdaftar
-                    </h3>
-                    <p className="text-xs text-neutral-500">
+                    <div className="flex items-center gap-2.5">
+                      <h3 className="font-['Figtree'] text-lg font-bold text-neutral-900">
+                        Basis Data Pelanggan & Jemaah Terdaftar
+                      </h3>
+                      {isSuperAdmin && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 border border-rose-200 px-2.5 py-0.5 text-[10px] font-bold text-rose-700">
+                          <Shield className="h-3 w-3 text-rose-600" />
+                          Super Admin Mode
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-neutral-500 mt-1">
                       Total {users.length} akun jemaah tersinkronisasi dari database PostgreSQL
                     </p>
+                  </div>
+
+                  <div>
+                    {isSuperAdmin ? (
+                      <button
+                        id="btn-tambah-pengguna"
+                        onClick={() => setIsCreateUserModalOpen(true)}
+                        className="inline-flex items-center gap-2 rounded-2xl bg-[#0F766E] px-4 py-2.5 text-xs font-bold text-white shadow-md shadow-teal-900/10 hover:bg-[#0D655E] transition active:scale-95 cursor-pointer"
+                      >
+                        <UserPlus className="h-4 w-4" />
+                        <span>Tambah Pengguna Baru</span>
+                      </button>
+                    ) : (
+                      <div
+                        className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800 font-medium"
+                        title="Hanya Super Admin yang berhak mendaftarkan akun baru"
+                      >
+                        <ShieldAlert className="h-4 w-4 text-amber-600 shrink-0" />
+                        <span>Tambah Pengguna (Khusus Super Admin)</span>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -1895,13 +2068,24 @@ export function AdminOverviewView({ initialData }: AdminOverviewViewProps) {
                           </td>
                           <td className="py-4 px-4 font-mono text-neutral-700">{u.phoneNumber}</td>
                           <td className="py-4 px-4">
-                            <span
-                              className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${
-                                u.role === 'ADMIN' ? 'bg-purple-100 text-purple-800' : 'bg-neutral-100 text-neutral-700'
-                              }`}
+                            <button
+                              type="button"
+                              onClick={() => isSuperAdmin && handleOpenChangeRoleModal(u)}
+                              disabled={!isSuperAdmin}
+                              className={`group inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-bold transition ${
+                                u.role === 'SUPER_ADMIN'
+                                  ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                                  : u.role === 'ADMIN'
+                                  ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                                  : 'bg-neutral-100 text-neutral-700'
+                              } ${isSuperAdmin ? 'hover:ring-2 hover:ring-teal-500/40 cursor-pointer' : 'cursor-default'}`}
+                              title={isSuperAdmin ? 'Klik untuk mengubah peran pengguna ini' : undefined}
                             >
-                              {u.role}
-                            </span>
+                              <span>{u.role === 'SUPER_ADMIN' ? 'SUPER ADMIN' : u.role}</span>
+                              {isSuperAdmin && (
+                                <ShieldCheck className="h-3 w-3 opacity-60 group-hover:opacity-100" />
+                              )}
+                            </button>
                           </td>
                           <td className="py-4 px-4 text-center font-bold text-neutral-800">{u.tripsCount || 0}</td>
                           <td className="py-4 px-4 text-right font-mono font-bold text-teal-700 text-sm">
@@ -1922,16 +2106,27 @@ export function AdminOverviewView({ initialData }: AdminOverviewViewProps) {
                                 <span className="text-neutral-400 w-8">-</span>
                               )}
                               <button
-                                onClick={() => handleToggleUserRole(u.id, u.role)}
-                                className="rounded-xl border border-blue-200 bg-blue-50 px-2 py-1.5 text-xs font-bold text-blue-700 hover:bg-blue-100 transition"
-                                title="Ubah Peran (Role)"
+                                onClick={() => handleOpenChangeRoleModal(u)}
+                                disabled={!isSuperAdmin}
+                                className={`rounded-xl border px-2.5 py-1.5 text-xs font-bold transition flex items-center gap-1 ${
+                                  isSuperAdmin
+                                    ? 'border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100 cursor-pointer shadow-sm'
+                                    : 'border-neutral-200 bg-neutral-100 text-neutral-400 cursor-not-allowed opacity-50'
+                                }`}
+                                title={isSuperAdmin ? 'Ubah Peran (Role)' : 'Hanya Super Admin yang dapat mengubah peran'}
                               >
                                 <ShieldCheck className="h-3.5 w-3.5" />
+                                <span className="text-[11px] font-semibold">Ubah Role</span>
                               </button>
                               <button
-                                onClick={() => handleDeleteUser(u.id)}
-                                className="rounded-xl border border-rose-200 bg-rose-50 px-2 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-100 transition"
-                                title="Hapus Akun"
+                                onClick={() => handleDeleteUser(u.id, u.role)}
+                                disabled={u.role === 'SUPER_ADMIN' && !isSuperAdmin}
+                                className={`rounded-xl border px-2 py-1.5 text-xs font-bold transition ${
+                                  u.role === 'SUPER_ADMIN' && !isSuperAdmin
+                                    ? 'border-neutral-200 bg-neutral-100 text-neutral-400 cursor-not-allowed opacity-50'
+                                    : 'border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 cursor-pointer'
+                                }`}
+                                title={u.role === 'SUPER_ADMIN' && !isSuperAdmin ? 'Hanya Super Admin yang dapat menghapus Super Admin' : 'Hapus Akun'}
                               >
                                 <X className="h-3.5 w-3.5" />
                               </button>
@@ -2402,6 +2597,336 @@ export function AdminOverviewView({ initialData }: AdminOverviewViewProps) {
               ) : (
                 <div className="py-8 text-center text-xs text-neutral-500">Memuat pengaturan sistem...</div>
               )}
+            </div>
+          )}
+          {/* Modal Tambah Pengguna Baru (Khusus Super Admin) */}
+          {isCreateUserModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-900/60 p-4 backdrop-blur-sm animate-in fade-in duration-200">
+              <div className="relative w-full max-w-lg rounded-3xl bg-white p-6 sm:p-8 shadow-2xl border border-neutral-100 animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
+                {/* Close button */}
+                <button
+                  type="button"
+                  onClick={() => !isCreatingUser && setIsCreateUserModalOpen(false)}
+                  className="absolute top-6 right-6 rounded-full p-2 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 transition"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+
+                {/* Header */}
+                <div className="flex items-center gap-3.5 mb-6">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-teal-50 text-teal-700 border border-teal-100">
+                    <UserPlus className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-['Figtree'] text-lg font-bold text-neutral-900">
+                        Tambah Pengguna Baru
+                      </h3>
+                      <span className="rounded-full bg-rose-50 border border-rose-200 px-2 py-0.5 text-[10px] font-bold text-rose-700">
+                        Super Admin
+                      </span>
+                    </div>
+                    <p className="text-xs text-neutral-500">
+                      Daftarkan akun jemaah, admin, atau super admin langsung ke sistem
+                    </p>
+                  </div>
+                </div>
+
+                <form onSubmit={handleCreateUser} className="space-y-4">
+                  {/* Name */}
+                  <div>
+                    <label className="block text-xs font-bold text-neutral-700 mb-1.5">
+                      Nama Lengkap <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="cth. Muhammad Farhan"
+                      value={newUserForm.name}
+                      onChange={(e) => setNewUserForm({ ...newUserForm, name: e.target.value })}
+                      className="w-full rounded-xl border border-neutral-200 bg-neutral-50 px-3.5 py-2.5 text-xs text-neutral-900 outline-none focus:border-teal-600 focus:bg-white transition"
+                    />
+                  </div>
+
+                  {/* Email */}
+                  <div>
+                    <label className="block text-xs font-bold text-neutral-700 mb-1.5">
+                      Alamat Email <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      placeholder="cth. farhan@gmail.com"
+                      value={newUserForm.email}
+                      onChange={(e) => setNewUserForm({ ...newUserForm, email: e.target.value })}
+                      className="w-full rounded-xl border border-neutral-200 bg-neutral-50 px-3.5 py-2.5 text-xs text-neutral-900 outline-none focus:border-teal-600 focus:bg-white transition"
+                    />
+                  </div>
+
+                  {/* Password */}
+                  <div>
+                    <label className="block text-xs font-bold text-neutral-700 mb-1.5">
+                      Kata Sandi / Password <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showNewUserPassword ? 'text' : 'password'}
+                        required
+                        minLength={6}
+                        placeholder="Minimal 6 karakter"
+                        value={newUserForm.password}
+                        onChange={(e) => setNewUserForm({ ...newUserForm, password: e.target.value })}
+                        className="w-full rounded-xl border border-neutral-200 bg-neutral-50 px-3.5 py-2.5 pr-10 text-xs text-neutral-900 outline-none focus:border-teal-600 focus:bg-white transition"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowNewUserPassword(!showNewUserPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600"
+                      >
+                        {showNewUserPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                    <span className="text-[10px] text-neutral-400 mt-1 block">
+                      Pengguna dapat mengubah kata sandi ini sewaktu-waktu melalui halaman profil.
+                    </span>
+                  </div>
+
+                  {/* Phone */}
+                  <div>
+                    <label className="block text-xs font-bold text-neutral-700 mb-1.5">
+                      Nomor WhatsApp / Telepon (Opsional)
+                    </label>
+                    <input
+                      type="tel"
+                      placeholder="cth. 081234567890"
+                      value={newUserForm.phoneNumber}
+                      onChange={(e) => setNewUserForm({ ...newUserForm, phoneNumber: e.target.value })}
+                      className="w-full rounded-xl border border-neutral-200 bg-neutral-50 px-3.5 py-2.5 text-xs text-neutral-900 outline-none focus:border-teal-600 focus:bg-white transition"
+                    />
+                  </div>
+
+                  {/* Role Selection */}
+                  <div>
+                    <label className="block text-xs font-bold text-neutral-700 mb-2">
+                      Peran Akun (Hak Akses) <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                      {[
+                        {
+                          role: 'USER' as const,
+                          title: 'User / Jemaah',
+                          desc: 'Pemesanan paket & hotel',
+                          activeColor: 'border-teal-600 bg-teal-50/70 text-teal-900 ring-2 ring-teal-600/20',
+                        },
+                        {
+                          role: 'ADMIN' as const,
+                          title: 'Admin',
+                          desc: 'Kelola order & paket wisata',
+                          activeColor: 'border-purple-600 bg-purple-50/70 text-purple-900 ring-2 ring-purple-600/20',
+                        },
+                        {
+                          role: 'SUPER_ADMIN' as const,
+                          title: 'Super Admin',
+                          desc: 'Hak akses penuh & user',
+                          activeColor: 'border-rose-600 bg-rose-50/70 text-rose-900 ring-2 ring-rose-600/20',
+                        },
+                      ].map((item) => {
+                        const isSelected = newUserForm.role === item.role;
+                        return (
+                          <button
+                            type="button"
+                            key={item.role}
+                            onClick={() => setNewUserForm({ ...newUserForm, role: item.role })}
+                            className={`flex flex-col text-left p-3 rounded-2xl border transition-all cursor-pointer ${
+                              isSelected
+                                ? item.activeColor
+                                : 'bg-neutral-50/50 border-neutral-200 hover:border-neutral-300'
+                            }`}
+                          >
+                            <span className="font-bold text-xs">{item.title}</span>
+                            <span className="text-[10px] text-neutral-500 mt-1 leading-snug">{item.desc}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Auto-verified badge note */}
+                  <div className="rounded-2xl bg-teal-50/80 border border-teal-100 p-3 text-[11px] text-teal-900 flex items-start gap-2.5">
+                    <CheckCircle2 className="h-4 w-4 text-teal-600 shrink-0 mt-0.5" />
+                    <span>
+                      Akun yang dibuat melalui Super Admin akan langsung <strong>Terverifikasi</strong> (Verified) dan dapat segera login tanpa verifikasi email manual.
+                    </span>
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex items-center justify-end gap-3 pt-3 border-t border-neutral-100">
+                    <button
+                      type="button"
+                      disabled={isCreatingUser}
+                      onClick={() => setIsCreateUserModalOpen(false)}
+                      className="rounded-xl border border-neutral-200 px-4 py-2.5 text-xs font-bold text-neutral-600 hover:bg-neutral-50 transition cursor-pointer"
+                    >
+                      Batal
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isCreatingUser}
+                      className="inline-flex items-center gap-2 rounded-xl bg-teal-700 px-5 py-2.5 text-xs font-bold text-white hover:bg-teal-800 transition disabled:opacity-50 shadow-md shadow-teal-700/20 cursor-pointer"
+                    >
+                      {isCreatingUser ? (
+                        <>
+                          <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                          <span>Mendaftarkan...</span>
+                        </>
+                      ) : (
+                        <>
+                          <UserPlus className="h-3.5 w-3.5" />
+                          <span>Daftarkan Pengguna</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* Modal Ubah Peran Pengguna (Khusus Super Admin) */}
+          {selectedUserForRole && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-900/60 p-4 backdrop-blur-sm animate-in fade-in duration-200">
+              <div className="relative w-full max-w-md rounded-3xl bg-white p-6 sm:p-7 shadow-2xl border border-neutral-100 animate-in zoom-in-95 duration-200">
+                <button
+                  type="button"
+                  onClick={() => !isUpdatingRole && setSelectedUserForRole(null)}
+                  className="absolute top-6 right-6 rounded-full p-2 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 transition cursor-pointer"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+
+                <div className="flex items-center gap-3.5 mb-5">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-teal-50 text-teal-700 border border-teal-100">
+                    <ShieldCheck className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-['Figtree'] text-base font-bold text-neutral-900">
+                      Ubah Peran Pengguna
+                    </h3>
+                    <p className="text-xs text-neutral-500">
+                      Sesuaikan tingkat hak akses untuk akun ini
+                    </p>
+                  </div>
+                </div>
+
+                {/* Target User Info */}
+                <div className="rounded-2xl bg-neutral-50 border border-neutral-200/80 p-3.5 mb-5 flex items-center justify-between">
+                  <div>
+                    <p className="font-bold text-xs text-neutral-900">{selectedUserForRole.name}</p>
+                    <p className="text-[11px] text-neutral-500 font-mono">{selectedUserForRole.email}</p>
+                  </div>
+                  <span
+                    className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${
+                      selectedUserForRole.currentRole === 'SUPER_ADMIN'
+                        ? 'bg-rose-100 text-rose-800'
+                        : selectedUserForRole.currentRole === 'ADMIN'
+                        ? 'bg-purple-100 text-purple-800'
+                        : 'bg-neutral-200 text-neutral-700'
+                    }`}
+                  >
+                    Saat ini: {selectedUserForRole.currentRole}
+                  </span>
+                </div>
+
+                <form onSubmit={handleSaveUserRole} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-neutral-700 mb-2">
+                      Pilih Peran Baru:
+                    </label>
+                    <div className="space-y-2">
+                      {[
+                        {
+                          role: 'USER' as const,
+                          title: 'User / Jemaah',
+                          desc: 'Akses pemesanan paket umrah, hotel, dan riwayat transaksi pribadi.',
+                          activeColor: 'border-teal-600 bg-teal-50/70 text-teal-900 ring-2 ring-teal-600/20',
+                        },
+                        {
+                          role: 'ADMIN' as const,
+                          title: 'Admin Operasional',
+                          desc: 'Akses dashboard admin untuk memproses booking, verifikasi pesanan, dan update produk.',
+                          activeColor: 'border-purple-600 bg-purple-50/70 text-purple-900 ring-2 ring-purple-600/20',
+                        },
+                        {
+                          role: 'SUPER_ADMIN' as const,
+                          title: 'Super Admin',
+                          desc: 'Akses penuh tanpa batas: kelola seluruh sistem, mendaftarkan akun baru, dan mengubah peran pengguna lain.',
+                          activeColor: 'border-rose-600 bg-rose-50/70 text-rose-900 ring-2 ring-rose-600/20',
+                        },
+                      ].map((item) => {
+                        const isSelected = selectedUserForRole.newRole === item.role;
+                        return (
+                          <button
+                            type="button"
+                            key={item.role}
+                            onClick={() =>
+                              setSelectedUserForRole({
+                                ...selectedUserForRole,
+                                newRole: item.role,
+                              })
+                            }
+                            className={`w-full flex items-start gap-3 text-left p-3.5 rounded-2xl border transition-all cursor-pointer ${
+                              isSelected
+                                ? item.activeColor
+                                : 'bg-white border-neutral-200 hover:border-neutral-300'
+                            }`}
+                          >
+                            <div className="mt-0.5">
+                              <div
+                                className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                                  isSelected
+                                    ? 'border-teal-600 bg-teal-600'
+                                    : 'border-neutral-300 bg-white'
+                                }`}
+                              >
+                                {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                              </div>
+                            </div>
+                            <div className="flex-1">
+                              <span className="font-bold text-xs block text-neutral-900">{item.title}</span>
+                              <span className="text-[11px] text-neutral-500 leading-relaxed block mt-0.5">{item.desc}</span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-3 pt-3 border-t border-neutral-100">
+                    <button
+                      type="button"
+                      disabled={isUpdatingRole}
+                      onClick={() => setSelectedUserForRole(null)}
+                      className="rounded-xl border border-neutral-200 px-4 py-2 text-xs font-bold text-neutral-600 hover:bg-neutral-50 transition cursor-pointer"
+                    >
+                      Batal
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isUpdatingRole || selectedUserForRole.currentRole === selectedUserForRole.newRole}
+                      className="inline-flex items-center gap-2 rounded-xl bg-teal-700 px-5 py-2 text-xs font-bold text-white hover:bg-teal-800 transition disabled:opacity-50 shadow-md shadow-teal-700/20 cursor-pointer"
+                    >
+                      {isUpdatingRole ? (
+                        <>
+                          <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                          <span>Menyimpan...</span>
+                        </>
+                      ) : (
+                        <span>Simpan Perubahan Peran</span>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              </div>
             </div>
           )}
         </div>

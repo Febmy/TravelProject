@@ -26,7 +26,7 @@ export const authOptions: AuthOptions = {
           throw new Error("User not found");
         }
 
-        if (!user.isVerified) {
+        if (!user.isVerified && user.role !== 'ADMIN' && user.role !== 'SUPER_ADMIN') {
           throw new Error("Email belum diverifikasi. Silakan cek kotak masuk Anda.");
         }
 
@@ -53,6 +53,21 @@ export const authOptions: AuthOptions = {
       if (user) {
         token.role = user.role;
         token.id = user.id;
+      }
+      // Selalu sinkronkan role terkini dari database agar perubahan role aktif seketika
+      if (token?.email) {
+        try {
+          const dbUser = await prisma.user.findUnique({
+            where: { email: token.email as string },
+            select: { role: true, id: true }
+          });
+          if (dbUser) {
+            token.role = dbUser.role;
+            token.id = dbUser.id;
+          }
+        } catch (e) {
+          // ignore
+        }
       }
       return token;
     },

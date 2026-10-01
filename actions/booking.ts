@@ -1,14 +1,17 @@
 'use server';
 
 import prisma from '@/lib/prisma';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { CreateBookingDTO } from '@/types';
 import { bookingSchema } from '@/lib/validations';
 import { createPaymentTransaction } from '@/lib/payment';
 import { sendBookingEmail } from '@/lib/email';
+import { serializeToPlain } from '@/lib/serialize';
 
 function serializeBooking(b: any) {
   if (!b) return null;
-  return {
+  return serializeToPlain({
     ...b,
     totalPrice: b.totalPrice ? Number(b.totalPrice.toString()) : 0,
     payment: b.payment
@@ -40,17 +43,29 @@ function serializeBooking(b: any) {
                 price: b.schedule.package.price
                   ? Number(b.schedule.package.price.toString())
                   : 0,
+                mealPlanAddonPrice: b.schedule.package.mealPlanAddonPrice
+                  ? Number(b.schedule.package.mealPlanAddonPrice.toString())
+                  : 0,
               }
             : null,
         }
       : null,
-  };
+  });
 }
 
 /**
  * Server Action: Submit Booking (Tour/Umrah atau Hotel) ke Database PostgreSQL
  */
 export async function createBookingAction(input: CreateBookingDTO) {
+  // 0. Keamanan: User WAJIB masuk (login) atau mendaftar terlebih dahulu sebelum memesan
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    return {
+      success: false,
+      error: 'Anda harus masuk (login) atau mendaftar akun terlebih dahulu untuk melakukan pemesanan.',
+    };
+  }
+
   // Validate input using Zod
   const validationResult = bookingSchema.safeParse(input);
   if (!validationResult.success) {
@@ -89,13 +104,23 @@ export async function createBookingAction(input: CreateBookingDTO) {
     let finalTitle = title || (itemType === 'HOTEL' ? 'Reservasi Hotel' : 'Paket Perjalanan');
     let calculatedPrice = totalPrice ? Number(totalPrice) : 0;
 
-    // 0. Verifikasi keberadaan userId jika diberikan
-    if (userId) {
-      const userExists = await prisma.user.findUnique({ where: { id: userId } });
-      if (userExists) {
-        finalUserId = userExists.id;
-      }
+    // 0. Verifikasi dan kaitkan booking langsung ke akun pengguna yang sedang login
+    const callerConditions: any[] = [];
+    if (session.user.id) callerConditions.push({ id: String(session.user.id) });
+    if (session.user.email) callerConditions.push({ email: String(session.user.email) });
+
+    const authUser = callerConditions.length > 0 ? await prisma.user.findFirst({
+      where: { OR: callerConditions },
+      select: { id: true, name: true, email: true },
+    }) : null;
+
+    if (!authUser) {
+      return {
+        success: false,
+        error: 'Sesi akun tidak valid atau tidak ditemukan di database. Silakan login kembali.',
+      };
     }
+    finalUserId = authUser.id;
 
     // 1. Jika tipe TOUR / UMRAH dan ada scheduleId
     if (itemType === 'TOUR' && scheduleId) {

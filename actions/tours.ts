@@ -2,6 +2,7 @@
 
 import prisma from '@/lib/prisma';
 import { TourFilterParams } from '@/types';
+import { serializeToPlain } from '@/lib/serialize';
 
 /**
  * Server Action: Ambil Daftar Paket Wisata dengan Filter Relasional & Rentang Harga
@@ -65,11 +66,12 @@ export async function getToursAction(params?: TourFilterParams) {
     const safePackages = packages.map((pkg: any) => ({
       ...pkg,
       price: pkg.price ? Number(pkg.price.toString()) : 0,
+      mealPlanAddonPrice: pkg.mealPlanAddonPrice ? Number(pkg.mealPlanAddonPrice.toString()) : 0,
     }));
 
     return {
       success: true,
-      data: safePackages,
+      data: serializeToPlain(safePackages),
     };
   } catch (error: any) {
     return {
@@ -106,11 +108,12 @@ export async function getTourBySlugAction(slug: string) {
     const safeTour = {
       ...tour,
       price: tour.price ? Number(tour.price.toString()) : 0,
+      mealPlanAddonPrice: tour.mealPlanAddonPrice ? Number(tour.mealPlanAddonPrice.toString()) : 0,
     };
 
     return {
       success: true,
-      data: safeTour,
+      data: serializeToPlain(safeTour),
     };
   } catch (error: any) {
     return {

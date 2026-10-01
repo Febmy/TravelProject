@@ -122,14 +122,14 @@ export function Navbar({ openDsk }: NavbarProps) {
             </Link>
           ) : (
             <div className="hidden sm:flex items-center gap-2">
-              {session.user.role === 'ADMIN' && (
+              {(session.user.role === 'ADMIN' || session.user.role === 'SUPER_ADMIN') && (
                 <Link
                   href="/admin"
                   className="flex items-center gap-1.5 rounded-xl border border-[#0F766E]/20 bg-[#F0FDFA] px-3.5 py-2 text-xs font-bold text-[#0F766E] hover:bg-[#CCFBF1] transition"
                   title="Admin Dashboard"
                 >
                   <LayoutDashboard className="h-3.5 w-3.5" />
-                  <span>Admin</span>
+                  <span>{session.user.role === 'SUPER_ADMIN' ? 'Super Admin' : 'Admin'}</span>
                 </Link>
               )}
               <Link
@@ -213,14 +213,14 @@ export function Navbar({ openDsk }: NavbarProps) {
             </Link>
           ) : (
             <div className="border-t border-[#EAE6E1] pt-3 mt-3">
-              {session.user.role === 'ADMIN' && (
+              {(session.user.role === 'ADMIN' || session.user.role === 'SUPER_ADMIN') && (
                 <Link
                   href="/admin"
                   onClick={() => setMobileMenuOpen(false)}
                   className="flex items-center gap-2 py-2 text-sm font-semibold text-[#0F766E]"
                 >
                   <LayoutDashboard className="h-4 w-4" />
-                  Admin Dashboard
+                  {session.user.role === 'SUPER_ADMIN' ? 'Super Admin Dashboard' : 'Admin Dashboard'}
                 </Link>
               )}
               <Link

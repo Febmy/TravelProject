@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Mail, Lock, User, Phone, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { figmaAssets } from '@/lib/figma-data';
 
@@ -12,6 +13,10 @@ interface RegisterViewProps {
 }
 
 export function RegisterView({ setScreen }: RegisterViewProps) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const callbackUrl = searchParams.get('callbackUrl') || '';
+
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -70,7 +75,11 @@ export function RegisterView({ setScreen }: RegisterViewProps) {
         return;
       }
 
-      setScreen('profile');
+      if (callbackUrl) {
+        router.push(callbackUrl);
+      } else {
+        setScreen('profile');
+      }
     } catch (err) {
       setError('Terjadi kesalahan saat menghubungi server.');
       setLoading(false);
@@ -260,7 +269,7 @@ export function RegisterView({ setScreen }: RegisterViewProps) {
               <div className="mt-6 text-center text-xs text-[#6B6E6E] border-t border-[#EAE6E1] pt-3">
                 <span>Sudah punya akun? </span>
                 <Link
-                  href="/login"
+                  href={callbackUrl ? `/login?callbackUrl=${encodeURIComponent(callbackUrl)}` : '/login'}
                   className="font-bold text-[#0F766E] hover:underline"
                 >
                   Masuk

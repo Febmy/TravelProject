@@ -1,13 +1,37 @@
 'use server';
 
 import prisma from '@/lib/prisma';
+import bcrypt from 'bcrypt';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
+import { serializeToPlain } from '@/lib/serialize';
+
+// Helper: Mengambil data pengguna terkini langsung dari PostgreSQL untuk menghindari masalah JWT kedaluwarsa
+async function getAuthoritativeUser(session: any) {
+  if (!session?.user) return null;
+  const conditions: any[] = [];
+  if (session.user.id) conditions.push({ id: String(session.user.id) });
+  if (session.user.email) conditions.push({ email: String(session.user.email) });
+  if (conditions.length === 0) return null;
+
+  return prisma.user.findFirst({
+    where: { OR: conditions },
+    select: { id: true, name: true, email: true, role: true },
+  });
+}
 
 export async function getAdminDashboardData() {
   const session = await getServerSession(authOptions);
   
-  if (!session || session.user.role !== 'ADMIN') {
+  if (!session) {
+    return { success: false, error: 'Unauthorized' };
+  }
+
+  // Ambil data user terkini langsung dari Postgres untuk mendapatkan role yang valid
+  const dbCurrentUser = await getAuthoritativeUser(session);
+  const activeRole = dbCurrentUser?.role || (session.user.role as any);
+
+  if (activeRole !== 'ADMIN' && activeRole !== 'SUPER_ADMIN') {
     return { success: false, error: 'Unauthorized' };
   }
 
@@ -167,6 +191,7 @@ export async function getAdminDashboardData() {
     const safePackages = packages.map(p => ({
       ...p,
       price: p.price ? Number(p.price.toString()) : 0,
+      mealPlanAddonPrice: p.mealPlanAddonPrice ? Number(p.mealPlanAddonPrice.toString()) : 0,
       quotaTotal: p.schedules.reduce((acc, s) => acc + s.quota, 0),
       bookedTotal: p.schedules.reduce((acc, s) => acc + s.bookedCount, 0),
     }));
@@ -200,6 +225,7 @@ export async function getAdminDashboardData() {
         package: b.schedule.package ? {
           ...b.schedule.package,
           price: b.schedule.package.price ? Number(b.schedule.package.price.toString()) : 0,
+          mealPlanAddonPrice: b.schedule.package.mealPlanAddonPrice ? Number(b.schedule.package.mealPlanAddonPrice.toString()) : 0,
         } : null,
       } : null,
     }));
@@ -217,15 +243,15 @@ export async function getAdminDashboardData() {
 
     return {
       success: true,
-      data: {
+      data: serializeToPlain({
         packages: safePackages,
         hotels: safeHotels,
         bookings: safeBookings,
         users: safeUsers,
-        promos: JSON.parse(JSON.stringify(promos)),
-        auditLogs: JSON.parse(JSON.stringify(auditLogs)),
+        promos,
+        auditLogs,
         systemSetting,
-        bankAccounts: JSON.parse(JSON.stringify(bankAccounts)),
+        bankAccounts,
         stats: {
           totalRevenue,
           activeBookingsCount: pendingBookings.length,
@@ -235,8 +261,14 @@ export async function getAdminDashboardData() {
           totalBookings: safeBookings.length,
           totalUsers: safeUsers.length,
         },
+        currentUser: {
+          id: dbCurrentUser?.id || session.user.id,
+          name: dbCurrentUser?.name || session.user.name,
+          email: dbCurrentUser?.email || session.user.email,
+          role: activeRole,
+        },
         weeklyRevenue
-      }
+      })
     };
   } catch (error: any) {
     console.error('Admin data fetch error:', error);
@@ -257,7 +289,7 @@ export async function updatePackageAction(packageId: string, data: { title?: str
         description: data.description,
       }
     });
-    return { success: true, data: { ...updated, price: Number(updated.price) } };
+    return { success: true, data: serializeToPlain(updated) };
   } catch (err: any) {
     return { success: false, error: err.message };
   }
@@ -276,7 +308,7 @@ export async function updateHotelAction(hotelId: string, data: { name?: string; 
         location: data.location,
       }
     });
-    return { success: true, data: { ...updated, price: Number(updated.price) } };
+    return { success: true, data: serializeToPlain(updated) };
   } catch (err: any) {
     return { success: false, error: err.message };
   }
@@ -311,7 +343,7 @@ export async function cancelBookingAction(bookingId: string, reason?: string) {
       return b;
     });
 
-    return { success: true, data: { ...updated, totalPrice: Number(updated.totalPrice) } };
+    return { success: true, data: serializeToPlain(updated) };
   } catch (err: any) {
     return { success: false, error: err.message };
   }
@@ -396,9 +428,7 @@ export async function createPackageAction(data: any) {
       }
     });
 
-    // Serialization to remove Prisma Decimal objects
-    const serializedPkg = JSON.parse(JSON.stringify(newPkg));
-    return { success: true, data: { ...serializedPkg, price: Number(serializedPkg.price) } };
+    return { success: true, data: serializeToPlain(newPkg) };
   } catch (err: any) {
     console.error('createPackageAction error:', err);
     return { success: false, error: err.message };
@@ -447,9 +477,7 @@ export async function createHotelAction(data: any) {
       }
     });
 
-    // Serialization to remove Prisma Decimal objects
-    const serializedHotel = JSON.parse(JSON.stringify(newHotel));
-    return { success: true, data: { ...serializedHotel, price: Number(serializedHotel.price) } };
+    return { success: true, data: serializeToPlain(newHotel) };
   } catch (err: any) {
     console.error('createHotelAction error:', err);
     return { success: false, error: err.message };
@@ -470,7 +498,7 @@ export async function createPromoAction(data: { code: string; campaign: string; 
         isActive: data.isActive,
       }
     });
-    return { success: true, data: JSON.parse(JSON.stringify(promo)) };
+    return { success: true, data: serializeToPlain(promo) };
   } catch (err: any) {
     console.error('createPromo error:', err);
     return { success: false, error: err.message };
@@ -498,21 +526,146 @@ export async function togglePromoAction(id: string, isActive: boolean) {
       where: { id },
       data: { isActive }
     });
-    return { success: true, data: JSON.parse(JSON.stringify(promo)) };
+    return { success: true, data: serializeToPlain(promo) };
   } catch (err: any) {
     return { success: false, error: err.message };
   }
 }
 
 /**
- * Server Action: Update User Role (Admin / User)
+ * Server Action: Daftarkan Pengguna Baru oleh Super Admin
+ * Keamanan Ketat: Hanya user dengan role 'SUPER_ADMIN' yang berhak mendaftarkan akun baru.
  */
-export async function updateUserRoleAction(id: string, role: 'ADMIN' | 'USER') {
+export async function createUserBySuperAdminAction(data: {
+  name: string;
+  email: string;
+  password: string;
+  role: 'USER' | 'ADMIN' | 'SUPER_ADMIN';
+  phoneNumber?: string;
+}) {
   try {
     const session = await getServerSession(authOptions);
+
+    if (!session) {
+      return {
+        success: false,
+        error: 'Sesi login tidak valid. Silakan login kembali.',
+      };
+    }
+
+    // Ambil role terkini pemanggil langsung dari PostgreSQL (mencegah token JWT usang)
+    const dbCaller = await getAuthoritativeUser(session);
+    const callerRole = dbCaller?.role || (session.user.role as any);
+
+    if (callerRole !== 'SUPER_ADMIN') {
+      return {
+        success: false,
+        error: 'Akses Ditolak: Hanya Super Admin yang berhak mendaftarkan akun baru dari dashboard.',
+      };
+    }
+
+    const { name, email, password, role, phoneNumber } = data;
+
+    if (!name?.trim()) {
+      return { success: false, error: 'Nama lengkap wajib diisi.' };
+    }
+
+    if (!email?.trim()) {
+      return { success: false, error: 'Alamat email wajib diisi.' };
+    }
+
+    const cleanEmail = email.toLowerCase().trim();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(cleanEmail)) {
+      return { success: false, error: 'Format email tidak valid.' };
+    }
+
+    if (!password || password.length < 6) {
+      return { success: false, error: 'Password minimal harus 6 karakter.' };
+    }
+
+    const validRoles = ['USER', 'ADMIN', 'SUPER_ADMIN'];
+    const assignedRole = validRoles.includes(role) ? role : 'USER';
+
+    const existingUser = await prisma.user.findUnique({
+      where: { email: cleanEmail },
+    });
+
+    if (existingUser) {
+      return { success: false, error: 'Email ini sudah terdaftar di sistem.' };
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    const newUser = await prisma.user.create({
+      data: {
+        name: name.trim(),
+        email: cleanEmail,
+        passwordHash,
+        role: assignedRole as any,
+        phoneNumber: phoneNumber?.trim() || null,
+        isVerified: true, // Otomatis terverifikasi karena didaftarkan oleh Super Admin
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        phoneNumber: true,
+        createdAt: true,
+      },
+    });
+
+    // Catat log audit
+    await prisma.auditLog.create({
+      data: {
+        userId: session.user.id || 'SUPER_ADMIN',
+        userName: session.user.name || 'Super Admin',
+        action: 'CREATE_USER',
+        entityType: 'USER',
+        entityId: newUser.id,
+        details: `Super Admin membuat akun ${newUser.name} (${newUser.email}) dengan peran ${newUser.role}`,
+      },
+    });
+
+    return { success: true, data: newUser };
+  } catch (err: any) {
+    console.error('Error createUserBySuperAdminAction:', err);
+    return { success: false, error: err.message || 'Gagal membuat pengguna baru.' };
+  }
+}
+
+/**
+ * Server Action: Update User Role (Admin / User / Super Admin)
+ */
+export async function updateUserRoleAction(id: string, role: 'USER' | 'ADMIN' | 'SUPER_ADMIN') {
+  try {
+    const session = await getServerSession(authOptions);
+
+    if (!session) {
+      return { success: false, error: 'Sesi login tidak valid. Silakan login kembali.' };
+    }
+
+    // Ambil role terkini pemanggil langsung dari database
+    const dbCaller = await getAuthoritativeUser(session);
+    const callerRole = dbCaller?.role || (session.user.role as any);
+
+    // Hanya Super Admin yang berhak mengubah peran pengguna
+    if (callerRole !== 'SUPER_ADMIN') {
+      return {
+        success: false,
+        error: 'Akses Ditolak: Hanya Super Admin yang berhak mengubah peran akun pengguna.',
+      };
+    }
+
+    const targetUser = await prisma.user.findUnique({ where: { id } });
+    if (!targetUser) {
+      return { success: false, error: 'Pengguna tidak ditemukan' };
+    }
+
     const user = await prisma.user.update({
       where: { id },
-      data: { role },
+      data: { role: role as any },
       select: {
         id: true,
         name: true,
@@ -546,8 +699,17 @@ export async function updateUserRoleAction(id: string, role: 'ADMIN' | 'USER') {
 export async function deleteUserAction(id: string) {
   try {
     const session = await getServerSession(authOptions);
+
+    if (!session || (session.user.role !== 'SUPER_ADMIN' && session.user.role !== 'ADMIN')) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
     const deletedUser = await prisma.user.findUnique({ where: { id } });
     
+    if (deletedUser?.role === 'SUPER_ADMIN' && session.user.role !== 'SUPER_ADMIN') {
+      return { success: false, error: 'Hanya Super Admin yang berhak menghapus akun Super Admin.' };
+    }
+
     await prisma.user.delete({ where: { id } });
 
     if (deletedUser) {

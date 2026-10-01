@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Mail, Lock, ArrowRight, ShieldCheck } from 'lucide-react';
 import { figmaAssets } from '@/lib/figma-data';
 
@@ -12,6 +13,10 @@ interface LoginViewProps {
 }
 
 export function LoginView({ setScreen }: LoginViewProps) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const callbackUrl = searchParams.get('callbackUrl') || '';
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(true);
@@ -35,7 +40,11 @@ export function LoginView({ setScreen }: LoginViewProps) {
         return;
       }
 
-      setScreen('profile');
+      if (callbackUrl) {
+        router.push(callbackUrl);
+      } else {
+        setScreen('profile');
+      }
     } catch (err) {
       setError('Terjadi kesalahan saat mencoba masuk.');
     } finally {
@@ -153,7 +162,7 @@ export function LoginView({ setScreen }: LoginViewProps) {
               <div className="mt-8 text-center text-xs text-[#6B6E6E] border-t border-[#EAE6E1] pt-4">
                 <span>Belum punya akun? </span>
                 <Link
-                  href="/register"
+                  href={callbackUrl ? `/register?callbackUrl=${encodeURIComponent(callbackUrl)}` : '/register'}
                   className="font-bold text-[#0F766E] hover:underline"
                 >
                   Daftar Sekarang

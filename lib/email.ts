@@ -87,8 +87,9 @@ export const sendBookingEmail = async (
   `;
 
   try {
+    const sender = `"Safara Travel" <${process.env.EMAIL_USER || 'no-reply@safaratravel.com'}>`;
     const info = await transporter.sendMail({
-      from: '"Travel Project" <no-reply@yourtravel.com>',
+      from: sender,
       to,
       subject,
       html: htmlContent,
@@ -127,8 +128,9 @@ export const sendVerificationEmail = async (to: string, token: string) => {
   `;
 
   try {
+    const sender = `"Safara Travel" <${process.env.EMAIL_USER || 'no-reply@safaratravel.com'}>`;
     const info = await transporter.sendMail({
-      from: '"Travel Project" <no-reply@yourtravel.com>',
+      from: sender,
       to,
       subject: 'Verifikasi Akun Travel Anda',
       html: htmlContent,
